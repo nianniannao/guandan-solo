@@ -25,3 +25,7 @@
 
 F-Droid 会用其自有密钥重新签名，与本仓库 Release 中的 APK 签名不同，属正常现象。
 安装时请先卸载 GitHub 版本，否则会因签名不同安装失败。
+
+## 已提交的上游合并请求
+
+- GitLab MR：https://gitlab.com/fdroid/fdroiddata/-/merge_requests/57812 （!57812，源分支 `nianniannao/fdroiddata:add-guandan-solo` → `fdroid/fdroiddata:master`）
