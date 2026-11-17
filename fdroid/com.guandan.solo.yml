@@ -12,9 +12,10 @@ Description: |
   国标江苏掼蛋（两副牌 108 张、逢人配、天王炸），三档 AI：初级简单策略、
   高级打分决策、终极打分加残局蒙特卡洛推演；思考强度可按难度独立选择快/标准/深度。
 
-  纯离线运行，无账号、无广告、无统计；五行八卦视觉，横屏牌桌；内置中文语音
-  播报出牌与不要，可一键关闭；自动存档并可继续上一局；局域网联机支持 UDP
-  广播自动发现房间、断线重连与 22 秒出牌超时托管，可与鸿蒙版互通。
+  纯离线运行，无账号、无广告、无统计；五行八卦视觉，横屏牌桌；播报走系统 TTS
+  （不含任何音频素材，推荐开源 RHVoice 中文包），可一键关闭；自动存档并可继续
+  上一局；局域网联机支持 UDP 广播自动发现房间、断线重连与 22 秒出牌超时托管，
+  可与鸿蒙版互通。
 
 RepoType: git
 Repo: https://github.com/nianniannao/guandan-solo.git
@@ -26,7 +27,6 @@ Builds:
     gradle:
       - yes
     output: app/build/outputs/apk/release/app-release-unsigned.apk
-    srclibs: []
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
