@@ -16,7 +16,6 @@ import java.util.Locale;
 public class Voice {
 
     private final Context ctx;
-    private LocalVoice local;
     private TextToSpeech tts;
     private boolean ready = false;
     private boolean langOk = false;
@@ -32,18 +31,7 @@ public class Voice {
 
     public Voice(Context c) {
         ctx = c.getApplicationContext();
-        try { local = new LocalVoice(ctx); } catch (Throwable e) { local = null; }
         open(null);
-    }
-
-    /** 内置离线语音是否可用 */
-    public boolean hasLocal() { return local != null && local.isReady(); }
-
-    /** 用内置素材播报若干片段 */
-    public void sayClips(String... parts) {
-        if (!enabled) return;
-        if (local == null || !local.isReady()) return;
-        local.play(parts);
     }
 
     private void open(String engine) {
@@ -126,10 +114,7 @@ public class Voice {
         if (!on && tts != null) {
             try { tts.stop(); } catch (Throwable e) { }
         }
-        if (!on) {
-            pending.clear();
-            if (local != null) local.stop();
-        }
+        if (!on) pending.clear();
     }
 
     public boolean isEnabled() { return enabled; }
@@ -173,10 +158,6 @@ public class Voice {
     }
 
     public void shutdown() {
-        if (local != null) {
-            try { local.release(); } catch (Throwable e) { }
-            local = null;
-        }
         if (tone != null) {
             try { tone.release(); } catch (Throwable e) { }
             tone = null;

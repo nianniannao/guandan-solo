@@ -724,7 +724,7 @@ public class GameView extends View {
                 voiceOn = !voiceOn;
                 if (voice != null) voice.setEnabled(voiceOn);
                 saveVoice();
-                if (voiceOn && voice != null && !voice.hasLocal() && (!voice.isReady() || !voice.hasChinese())) {
+                if (voiceOn && voice != null && (!voice.isReady() || !voice.hasChinese())) {
                     askVoiceEngine();
                 } else {
                     showToast(voiceOn ? "语音播报已开启" : "语音播报已关闭");
@@ -906,65 +906,12 @@ public class GameView extends View {
         if (sig.equals(voiceSig)) return;
         voiceSig = sig;
         String who = engine.lastPlayer == mySeat ? "你" : Engine.seatName(engine.lastPlayer);
-        if (voice.hasLocal()) {
-            ArrayList<String> parts = new ArrayList<String>();
-            parts.add(whoKey(engine.lastPlayer));
-            parts.add("out");
-            parts.addAll(playKeys(p));
-            voice.sayClips(parts.toArray(new String[0]));
-        } else {
-            voice.speak(who + "，出" + playText(p));
-        }
+        voice.speak(who + "，出" + playText(p));
     }
 
     private void speakPass(int seat) {
         if (!voiceOn || voice == null) return;
-        if (voice.hasLocal()) {
-            voice.sayClips(whoKey(seat), "pass");
-        } else {
-            voice.speak((seat == mySeat ? "你" : Engine.seatName(seat)) + "，不要");
-        }
-    }
-
-    /** 座位→播音片段：按相对位置，0 你 / 1 右家 / 2 对家 / 3 左家 */
-    private String whoKey(int seat) {
-        int d = (seat - mySeat + 4) % 4;
-        if (d == 0) return "w0";
-        if (d == 1) return "w2";
-        if (d == 2) return "w3";
-        return "w1";
-    }
-
-    private String wordKey(int w) {
-        if (w == 15) return "lv";
-        if (w == 16) return "xw";
-        if (w == 17) return "dw";
-        return String.valueOf(w);
-    }
-
-    private ArrayList<String> playKeys(Play p) {
-        ArrayList<String> k = new ArrayList<String>();
-        switch (p.type) {
-            case 1: k.add("s" + wordKey(p.key)); break;
-            case 2: k.add("p" + wordKey(p.key)); break;
-            case 3: k.add("t" + wordKey(p.key)); break;
-            case 4: k.add("h" + wordKey(p.key)); break;
-            case 5: k.add("straight"); break;
-            case 6: k.add("cp"); break;
-            case 7: k.add("plate"); break;
-            case 8: k.add("flush"); break;
-            case 10: k.add("king"); break;
-            default: k.add(bombKey(p.size));
-        }
-        return k;
-    }
-
-    private String bombKey(int size) {
-        String[] cn = {"四", "五", "六", "七", "八"};
-        int i = size - 4;
-        if (i < 0) i = 0;
-        if (i > 4) i = 4;
-        return "b" + cn[i];
+        voice.speak((seat == mySeat ? "你" : Engine.seatName(seat)) + "，不要");
     }
 
     private void promptTurn() {
@@ -976,8 +923,7 @@ public class GameView extends View {
         if (sig.equals(turnPromptSig)) return;
         turnPromptSig = sig;
         voice.beep();
-        if (voice.hasLocal()) voice.sayClips("turn");
-        else voice.speak("轮到你出牌");
+        voice.speak("轮到你出牌");
     }
 
     private String playText(Play p) {
