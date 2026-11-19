@@ -3,9 +3,9 @@
 一款纯 Java、零第三方依赖的安卓掼蛋应用：国标江苏掼蛋规则，三档 AI，五行八卦视觉，支持安卓 ↔ 鸿蒙局域网联机。
 
 - 包名：`com.guandan.solo`
-- 版本：7.2a（versionCode 11）
+- 版本：8.8（versionCode 20）
 - 最低系统：Android 5.0（minSdk 21），targetSdk 34
-- 体积：约 150 KB（不含任何音频素材）
+- 体积：约 470 KB（含 54 段离线语音素材）
 - 许可：GNU GPL v3.0（见 LICENSE）
 
 ## 功能
@@ -26,9 +26,9 @@
 每个难度都可选 快 / 标准 / 深度，对应残局模拟 3 / 8 / 14 次（高级深度档启用 6 次残局推演），并影响出牌停顿（0.3 / 0.8 / 1.4 秒）。设置存于 `SharedPreferences`（`think_0` / `think_1` / `think_2`）。
 
 **语音**
-播报走系统文字转语音（TTS）引擎，本应用不自带任何音频文件，因此不涉及音频版权问题。播报内容：某某出什么牌、某某不要、轮到你出牌（附短提示音）；顶部「声音 开/关」总开关，状态持久化。
+内置 54 段离线中文语音（edge-tts 合成，随 APK 打包，不依赖系统 TTS）。播报口径：首家出牌只报牌型、单张报点数；跟牌用「大你 / 管住 / 炸你」；过牌用「要不起」；多套说法随机切换。顶部「声音 开/关」总开关，状态持久化。播放按顺序串行，上一句播完才走下一家。
 
-若手机没有可用的中文 TTS（部分原生系统默认不带），推荐安装完全开源的 RHVoice：
+还可用系统 TTS 兜底（如设备无中文引擎，建议安装开源的 RHVoice）：
 
 1. 在 F-Droid 中搜索并安装 `RHVoice`；
 2. 在 RHVoice 内下载「中文（普通话）」语音包；
@@ -44,6 +44,7 @@
 - TCP 48620 传输牌局状态（行分隔 JSON），UDP 48621 广播发现（`GD?` / `GD!房间名|端口|房号`）
 - 房主分配座位，90 秒座位保留，断线自动重连
 - 22 秒出牌超时由房主托管
+- 出牌节奏 2/3/5/6 秒可调（右上角「节奏」按钮，默认 3 秒）
 - 协议见 `harmony/PROTOCOL.md`
 
 **鸿蒙版**
@@ -66,12 +67,12 @@ apksigner sign --ks release.keystore --out guandan.apk app-release-unsigned.apk
 ## 目录
 
 ```
-app/src/main/java/com/guandan/solo/   源码（11 个类）
+app/src/main/java/com/guandan/solo/   源码（14 个类）
   Card / Play / Rules                 牌与牌型判定
   Engine                              对局状态机与升级结算
-  AI                                  三档 AI（打分 + 残局模拟）
+  AI / AIOld / AINew                  三档 AI（默认走 AIOld + 新候选牌型生成与记牌控场）
   GameView                            自绘牌桌与全部交互
-  Voice                               系统 TTS 播报（多引擎兜底）
+  LocalVoice / Voice                  离线素材串行播放，系统 TTS 兜底
   Net / Json                          联机与协议
   Save                                进度存档
 app/src/main/res/                     图标与主题
@@ -92,11 +93,11 @@ java -cp out:tobj Strength    # 难度对照赛
 java -cp out:tobj SaveTest    # 存档编解码回归
 ```
 
-实测（云主机 JVM）：120 局 / 13,647 个动作全部正常结束，单步最慢 57ms；难度对照 150 局一组，终极·深度 vs 初级·快 93%，高级·深度 vs 初级·标准 90%，终极·深度 vs 高级·标准 67%。
+实测（云主机 JVM）：120 局 / 13,647 个动作全部正常结束，单步最慢 57ms；难度对照 150 局一组，终极·深度 vs 初级·快 93%，高级·深度 vs 初级·标准 90%，终极·深度 vs 高级·标准 67%。v8.0 AI 改写后对 v7.2 基线做 300 局对照两轮，胜率 57% / 58%。
 
 ## 语音素材说明
 
-本仓库与 Release APK 均不包含音频素材，播报完全依赖设备上的 TTS 引擎，便于满足 F-Droid 等自由软件仓库对素材版权的要求。
+`app/src/main/assets/voice/` 下为 54 段 edge-tts 合成的中文语音（约 490 KB），键名带 `n_` 前缀以避免与历史版本同名文件冲突；`index.txt` 记录每个键对应的毫秒时长，供串行播放与节奏控制使用。素材可用 `gen_voice.py` 重新生成（需安装 edge-tts）。
 
 ## 许可
 

@@ -59,6 +59,7 @@ public class GameView extends View {
     private int accent = E_EARTH;
 
     private Engine engine = new Engine();
+    private boolean aiPaused = false;
     private final List<Card> myHand = new ArrayList<Card>();
     private final List<Card> selected = new ArrayList<Card>();
 
@@ -99,8 +100,12 @@ public class GameView extends View {
     private long turnDeadline = 0;
     private static final long TURN_MS = 22000L;
     private final RectF btnVoice = new RectF();
+    private final RectF btnPace = new RectF();
     private Voice voice;
     private boolean voiceOn = true;
+    /** 每位 AI 的出牌间隔（毫秒），可由隐藏面板调整 */
+    private long paceMs = 3000L;
+
     private String voiceSig = "";
     private String turnPromptSig = "";
     private final String[] lastSeatTags = new String[]{"", "", "", ""};
@@ -119,6 +124,7 @@ public class GameView extends View {
             AI.thinkLevel = thinkLevels[2];
             voice = new Voice(ctx);
             voiceOn = ctx.getSharedPreferences("guandan", 0).getBoolean("voice", true);
+            paceMs = ctx.getSharedPreferences("guandan", 0).getInt("pace", 3000);
             voice.setEnabled(voiceOn);
         } catch (Throwable e) {
             voiceOn = false;
@@ -128,10 +134,14 @@ public class GameView extends View {
         cardH = dp(96);
         setFocusable(true);
         pCardBg.setStyle(Paint.Style.FILL);
-        pText.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        pText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        pText.setFakeBoldText(true);
     }
 
     private float dp(float v) { return v * d; }
+
+    /** 文本字号：在原有 dp 基础上整体放大，保证小屏也看得清 */
+    private float fs(float v) { return v * d * 1.18f; }
 
     @Override
     protected void onAttachedToWindow() {
@@ -143,7 +153,27 @@ public class GameView extends View {
     }
 
     @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        if (visibility != android.view.View.VISIBLE) {
+            // 切到后台：停下 AI 与语音，回来时再从当前桌面状态接着走
+            handler.removeCallbacks(aiRunnable);
+            aiPaused = true;
+            if (voice != null) voice.stopSpeech();
+            persist();
+        } else if (aiPaused) {
+            aiPaused = false;
+            syncVoiceSig();
+            invalidate();
+            scheduleAi();
+        }
+    }
+
+    @Override
     protected void onDetachedFromWindow() {
+        handler.removeCallbacks(aiRunnable);
+        handler.removeCallbacks(turnTimeout);
+        handler.removeCallbacks(turnTicker);
         persist();
         super.onDetachedFromWindow();
         try { if (voice != null) voice.shutdown(); } catch (Throwable e) { }
@@ -208,7 +238,7 @@ public class GameView extends View {
                 : new String[]{"巽·风行", "乾·天行", "坎·水渊"});
         selected.clear();
         sortHand();
-        voiceSig = "";
+        syncVoiceSig();
         invalidate();
         scheduleAi();
         showToast("已回到第 " + engine.roundNo + " 局");
@@ -286,13 +316,13 @@ public class GameView extends View {
         pText.setTextAlign(Paint.Align.CENTER);
         pText.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         pText.setColor(E_EARTH);
-        pText.setTextSize(dp(30));
+        pText.setTextSize(fs(30));
         pText.setLetterSpacing(0.30f);
         cv.drawText("掼蛋", w / 2 + dp(8), h * 0.28f, pText);
 
         pText.setLetterSpacing(0.20f);
         pText.setColor(C_SUB);
-        pText.setTextSize(dp(9));
+        pText.setTextSize(fs(9));
         cv.drawText("G U A N D A N   ·   S O L O", w / 2 + dp(4), h * 0.28f + dp(18), pText);
 
         String[] namesT = {"初 级", "高 级", "终 极"};
@@ -318,17 +348,17 @@ public class GameView extends View {
 
             pText.setTextAlign(Paint.Align.CENTER);
             pText.setColor(colors[i]);
-            pText.setTextSize(dp(16));
+            pText.setTextSize(fs(16));
             pText.setLetterSpacing(0.10f);
             cv.drawText(namesT[i], r.centerX(), r.top + dp(32), pText);
 
             pText.setLetterSpacing(0f);
             pText.setColor(0xAAFFFFFF);
-            pText.setTextSize(dp(10));
+            pText.setTextSize(fs(10));
             cv.drawText(elements[i], r.centerX(), r.top + dp(50), pText);
 
             pText.setColor(C_SUB);
-            pText.setTextSize(dp(9.5f));
+            pText.setTextSize(fs(9.5f));
             cv.drawText(desc[i], r.centerX(), r.bottom - dp(14), pText);
         }
 
@@ -347,7 +377,7 @@ public class GameView extends View {
             btnResume.set(w / 2 - dp(120), ly + dp(42), w / 2 + dp(120), ly + dp(72));
             pText.setTextAlign(Paint.Align.CENTER);
             pText.setColor(E_EARTH);
-            pText.setTextSize(dp(10.5f));
+            pText.setTextSize(fs(10.5f));
             cv.drawText("继续上一局 · 第 " + info[0] + " 局 打 " + Engine.levelText(info[1]),
                     btnResume.centerX(), btnResume.centerY() + dp(4), pText);
         } else {
@@ -359,7 +389,7 @@ public class GameView extends View {
         btnThinkSet.set(dp(16), footY - dp(14), dp(150), footY + dp(4));
         pText.setTextAlign(Paint.Align.LEFT);
         pText.setColor(0xCC9FB8C8);
-        pText.setTextSize(dp(9.5f));
+        pText.setTextSize(fs(9.5f));
         cv.drawText("AI 思考 " + thinkNames[Math.max(0, Math.min(2, thinkLevels[2]))]
                 + "/" + thinkNames[Math.max(0, Math.min(2, thinkLevels[1]))]
                 + "/" + thinkNames[Math.max(0, Math.min(2, thinkLevels[0]))] + "  ▸",
@@ -382,30 +412,35 @@ public class GameView extends View {
 
         pText.setTextAlign(Paint.Align.LEFT);
         pText.setColor(accent);
-        pText.setTextSize(dp(13));
+        pText.setTextSize(fs(13));
         pText.setLetterSpacing(0.12f);
         cv.drawText("掼 蛋", dp(16), dp(26), pText);
         pText.setLetterSpacing(0f);
 
         pText.setColor(C_TEXT);
-        pText.setTextSize(dp(11));
+        pText.setTextSize(fs(11));
         cv.drawText("第 " + engine.roundNo + " 局 · 打 " + Engine.levelText(engine.level), dp(70), dp(26), pText);
 
         pText.setColor(C_SUB);
-        pText.setTextSize(dp(10));
+        pText.setTextSize(fs(10));
         cv.drawText("我方 " + Engine.levelText(engine.teamLevel[0]) + "   对方 " + Engine.levelText(engine.teamLevel[1]),
                 dp(186), dp(26), pText);
 
         btnExit.set(w - dp(58), dp(8), w - dp(14), dp(32));
         pText.setTextAlign(Paint.Align.CENTER);
         pText.setColor(C_SUB);
-        pText.setTextSize(dp(10));
+        pText.setTextSize(fs(10));
         cv.drawText("退出", btnExit.centerX(), btnExit.centerY() + dp(3.5f), pText);
 
         btnVoice.set(w - dp(120), dp(8), w - dp(64), dp(32));
         pText.setColor(voiceOn ? accent : C_SUB);
-        pText.setTextSize(dp(10));
+        pText.setTextSize(fs(10));
         cv.drawText(voiceOn ? "声音 开" : "声音 关", btnVoice.centerX(), btnVoice.centerY() + dp(3.5f), pText);
+
+        btnPace.set(w - dp(184), dp(8), w - dp(124), dp(32));
+        pText.setColor(C_SUB);
+        pText.setTextSize(fs(9.5f));
+        cv.drawText("节奏 " + (paceMs / 1000) + "s", btnPace.centerX(), btnPace.centerY() + dp(3.5f), pText);
 
         drawBaguaRing(cv, w / 2, h * 0.47f, Math.min(w, h) * 0.165f);
 
@@ -419,12 +454,12 @@ public class GameView extends View {
             drawPlayCards(cv, last.cards, w / 2, cy, 0.50f);
             pText.setTextAlign(Paint.Align.CENTER);
             pText.setColor(0x77FFFFFF);
-            pText.setTextSize(dp(9));
+            pText.setTextSize(fs(9));
             cv.drawText(last.typeName() + " · " + Engine.seatName(engine.lastPlayer), w / 2, cy - dp(32), pText);
         } else if (!engine.roundOver) {
             pText.setTextAlign(Paint.Align.CENTER);
             pText.setColor(0x44FFFFFF);
-            pText.setTextSize(dp(10.5f));
+            pText.setTextSize(fs(10.5f));
             String wait = engine.turn == mySeat ? "你的出牌权" : "等待出牌…";
             if (engine.turn != mySeat && turnDeadline > 0) {
                 int left = (int) Math.max(0, (turnDeadline - System.currentTimeMillis() + 999) / 1000);
@@ -440,7 +475,7 @@ public class GameView extends View {
         if (!toast.isEmpty()) {
             pText.setTextAlign(Paint.Align.CENTER);
             pText.setColor(E_EARTH);
-            pText.setTextSize(dp(11.5f));
+            pText.setTextSize(fs(11.5f));
             cv.drawText(toast, w / 2, handTop - dp(56), pText);
         }
 
@@ -487,16 +522,16 @@ public class GameView extends View {
 
         pText.setTextAlign(Paint.Align.LEFT);
         pText.setColor(color);
-        pText.setTextSize(dp(10.5f));
+        pText.setTextSize(fs(10.5f));
         cv.drawText(nm, r.left + dp(8), r.top + dp(15), pText);
 
         pText.setColor(C_SUB);
-        pText.setTextSize(dp(8.5f));
+        pText.setTextSize(fs(8.5f));
         cv.drawText(mate ? "坤位 · 队友" : (seat == 3 ? "震位 · 左家" : "兑位 · 右家"),
                 r.left + dp(8), r.top + dp(27), pText);
 
         pText.setColor(C_TEXT);
-        pText.setTextSize(dp(11));
+        pText.setTextSize(fs(11));
         String cnt = engine.isFinished(seat) ? "已出完" : (engine.hands[seat].size() + " 张");
         cv.drawText(cnt, r.left + dp(8), r.top + dp(41), pText);
 
@@ -504,7 +539,7 @@ public class GameView extends View {
         if (tag == null) tag = engine.seatPassed[seat] ? "不要" : "—";
         pText.setTextAlign(Paint.Align.RIGHT);
         pText.setColor(isTurn && aiThinking ? accent : 0x88FFFFFF);
-        pText.setTextSize(dp(9));
+        pText.setTextSize(fs(9));
         cv.drawText(isTurn && aiThinking ? "思考中…" : tag, r.right - dp(8), r.top + dp(41), pText);
     }
 
@@ -536,8 +571,8 @@ public class GameView extends View {
         }
         cv.drawRoundRect(r, rad, rad, pStroke);
 
-        float ts = cardH * 0.235f * scale;
-        pText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        float ts = cardH * 0.255f * scale;
+        pText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
 
         if (c.isJoker()) {
             pText.setTextAlign(Paint.Align.LEFT);
@@ -557,7 +592,7 @@ public class GameView extends View {
         if (c.wild) {
             pText.setTextAlign(Paint.Align.RIGHT);
             pText.setColor(E_EARTH);
-            pText.setTextSize(dp(8) * Math.max(0.7f, scale));
+            pText.setTextSize(fs(8) * Math.max(0.7f, scale));
             cv.drawText("配", r.right - dp(3), r.bottom - dp(3), pText);
         }
         pText.setTextAlign(Paint.Align.LEFT);
@@ -587,7 +622,7 @@ public class GameView extends View {
 
         pText.setTextAlign(Paint.Align.LEFT);
         pText.setColor(C_SUB);
-        pText.setTextSize(dp(10));
+        pText.setTextSize(fs(10));
         cv.drawText(seatLabel(mySeat) + " · " + n + " 张", dp(12), handTop - dp(6), pText);
     }
 
@@ -621,7 +656,7 @@ public class GameView extends View {
         cv.drawRoundRect(r, dp(4), dp(4), pStroke);
 
         pText.setTextAlign(Paint.Align.CENTER);
-        pText.setTextSize(dp(11.5f));
+        pText.setTextSize(fs(11.5f));
         pText.setColor(primary ? (enabled ? 0xFF101315 : 0x66FFFFFF) : (enabled ? C_TEXT : 0x55FFFFFF));
         cv.drawText(text, r.centerX(), r.centerY() + dp(4f), pText);
     }
@@ -630,16 +665,16 @@ public class GameView extends View {
         float x = dp(14);
         float y = handTop - dp(58);
         pText.setTextAlign(Paint.Align.LEFT);
-        pText.setTextSize(dp(9.5f));
+        pText.setTextSize(fs(9.5f));
         for (int i = 0; i < Math.min(2, engine.log.size()); i++) {
             pText.setColor(i == 0 ? 0x99FFFFFF : 0x55FFFFFF);
-            cv.drawText(engine.log.get(i), x, y + i * dp(14), pText);
+            cv.drawText(engine.log.get(i), x, y + i * dp(16), pText);
         }
         if (!netInfo.isEmpty()) {
             pText.setColor(0x55FFFFFF);
-            pText.setTextSize(dp(9));
-            cv.drawText(netInfo, x, y + 2 * dp(14), pText);
-            pText.setTextSize(dp(9.5f));
+            pText.setTextSize(fs(9));
+            cv.drawText(netInfo, x, y + 2 * dp(16), pText);
+            pText.setTextSize(fs(9.5f));
         }
     }
 
@@ -661,20 +696,20 @@ public class GameView extends View {
 
         pText.setTextAlign(Paint.Align.CENTER);
         pText.setColor(accent);
-        pText.setTextSize(dp(13));
+        pText.setTextSize(fs(13));
         pText.setLetterSpacing(0.20f);
         cv.drawText("本 局 结 束", panel.centerX(), panel.top + dp(30), pText);
         pText.setLetterSpacing(0f);
 
         pText.setColor(C_TEXT);
-        pText.setTextSize(dp(11));
+        pText.setTextSize(fs(11));
         wrapText(cv, engine.resultText, panel.centerX(), panel.top + dp(54), panel.width() - dp(44), dp(17));
 
         btnContinue.set(panel.centerX() - dp(80), panel.bottom - dp(48), panel.centerX() + dp(80), panel.bottom - dp(14));
         pFill.setColor(accent);
         cv.drawRoundRect(btnContinue, dp(4), dp(4), pFill);
         pText.setColor(0xFF101315);
-        pText.setTextSize(dp(11.5f));
+        pText.setTextSize(fs(11.5f));
         cv.drawText((matchOver || engine.resultText.startsWith("打 A 成功")) ? "返回首页" : "继续下一局",
                 btnContinue.centerX(), btnContinue.centerY() + dp(4f), pText);
     }
@@ -720,11 +755,12 @@ public class GameView extends View {
                 if (btnContinue.contains(x, y)) continueGame();
                 return true;
             }
+            if (btnPace.contains(x, y)) { askPace(); return true; }
             if (btnVoice.contains(x, y)) {
                 voiceOn = !voiceOn;
                 if (voice != null) voice.setEnabled(voiceOn);
                 saveVoice();
-                if (voiceOn && voice != null && (!voice.isReady() || !voice.hasChinese())) {
+                if (voiceOn && voice != null && !voice.hasLocal() && (!voice.isReady() || !voice.hasChinese())) {
                     askVoiceEngine();
                 } else {
                     showToast(voiceOn ? "语音播报已开启" : "语音播报已关闭");
@@ -894,24 +930,88 @@ public class GameView extends View {
         scheduleAi();
     }
 
+    private final java.util.Random vr = new java.util.Random();
+
+    private String pick(String... keys) {
+        return keys[vr.nextInt(keys.length)];
+    }
+
+    /** 只同步播报签名、不出声：用于读档 / 重连 / 进房后补状态，避免重播桌上的旧牌 */
+    private void syncVoiceSig() {
+        Play p = engine == null ? null : engine.lastPlay;
+        if (p == null) { voiceSig = ""; return; }
+        StringBuilder sb = new StringBuilder();
+        sb.append(engine.lastPlayer).append('#').append(p.type).append('#')
+          .append(p.key).append('#').append(p.size).append('#').append(engine.lastLead).append('#');
+        for (Card c : p.cards) sb.append(c.id).append(',');
+        voiceSig = sb.toString();
+    }
+
     private void speakLastPlay() {
         if (!voiceOn || voice == null) return;
         Play p = engine.lastPlay;
         if (p == null) { voiceSig = ""; return; }
         StringBuilder sb = new StringBuilder();
         sb.append(engine.lastPlayer).append('#').append(p.type).append('#')
-          .append(p.key).append('#').append(p.size).append('#');
+          .append(p.key).append('#').append(p.size).append('#').append(engine.lastLead).append('#');
         for (Card c : p.cards) sb.append(c.id).append(',');
         String sig = sb.toString();
         if (sig.equals(voiceSig)) return;
         voiceSig = sig;
-        String who = engine.lastPlayer == mySeat ? "你" : Engine.seatName(engine.lastPlayer);
-        voice.speak(who + "，出" + playText(p));
+        boolean lead = engine.lastLead;
+        if (voice.hasLocal()) {
+            ArrayList<String> parts = new ArrayList<String>();
+            parts.add(lead ? leadKey(p) : followKey(p));
+            voice.sayClips(parts.toArray(new String[0]));
+        } else {
+            String body = lead ? leadText(p)
+                    : (p.power > 0 ? pick("炸你一下", "这个管得住") : pick("大你", "大你一手", "管住", "管上了"));
+            voice.speak(body);
+        }
     }
 
     private void speakPass(int seat) {
         if (!voiceOn || voice == null) return;
-        voice.speak((seat == mySeat ? "你" : Engine.seatName(seat)) + "，不要");
+        boolean toMate = engine.lastPlay != null && engine.lastPlayer >= 0
+                && engine.lastPlayer == (seat + 2) % 4;
+        if (voice.hasLocal()) {
+            voice.sayClips(toMate ? pick("y1", "y2") : pick("p1", "p2", "p3", "p4"));
+        } else {
+            voice.speak(toMate ? pick("让你一手", "你出吧")
+                    : pick("要不起", "这手要不起", "过，要不起", "这牌我啃不动"));
+        }
+    }
+
+    /** 座位→播音片段：按相对位置，0 我 / 1 左家 / 2 右家 / 3 对家 */
+    private String whoKey(int seat) {
+        int d = (seat - mySeat + 4) % 4;
+        if (d == 0) return "w0";
+        if (d == 1) return "w2";
+        if (d == 2) return "w3";
+        return "w1";
+    }
+
+    /** 首家出牌：单张报点数，其余只报牌型 */
+    private String leadKey(Play p) {
+        switch (p.type) {
+            case 1: return "s" + p.key;
+            case 2: return pick("u1", "u2");
+            case 3: return pick("u3", "u4");
+            case 4: return "u5";
+            case 5: return pick("u6", "u7");
+            case 6: return "u8";
+            case 7: return "u9";
+            case 8: return "u10";
+            case 10: return "z2";
+            case 9: return (p.size >= 4 && p.size <= 8) ? ("b" + p.size) : pick("z1", "b8");
+            default: return "u6";
+        }
+    }
+
+    /** 跟牌：用大你 / 管住 / 炸你 代替报牌 */
+    private String followKey(Play p) {
+        if (p.power > 0) return pick("f1", "f2");
+        return pick("d1", "d2", "d3", "g1", "g2", "g3", "g4");
     }
 
     private void promptTurn() {
@@ -922,23 +1022,30 @@ public class GameView extends View {
                 + (engine.lastPlay == null ? "-" : (engine.lastPlay.type + "" + engine.lastPlay.key));
         if (sig.equals(turnPromptSig)) return;
         turnPromptSig = sig;
-        voice.beep();
-        voice.speak("轮到你出牌");
+        // 等上一句播完再提示，避免两层语音叠在一起
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                if (!voiceOn || voice == null || engine == null || engine.roundOver) return;
+                if (engine.turn != mySeat) return;
+                voice.beep();
+                if (voice.hasLocal()) voice.sayClips(pick("t1", "t2"));
+                else voice.speak(pick("轮到你出牌", "到你了，慢慢想"));
+            }
+        }, voiceTailMs() + 250);
     }
 
-    private String playText(Play p) {
-        String r = p.cards.isEmpty() ? "" : rankText(p.cards.get(0).rank);
+    private String leadText(Play p) {
         switch (p.type) {
-            case 1: return "单张 " + r;
-            case 2: return "一对 " + r;
-            case 3: return "三张 " + r;
-            case 4: return "三带二，三张 " + r;
+            case 1: return "单张 " + rankText(p.cards.isEmpty() ? 2 : p.cards.get(0).rank);
+            case 2: return "对子";
+            case 3: return "三张";
+            case 4: return "三带二";
             case 5: return "顺子";
             case 6: return "三连对";
             case 7: return "钢板";
             case 8: return "同花顺";
             case 10: return "天王炸";
-            default: return p.size + " 张炸弹";
+            default: return "炸弹";
         }
     }
 
@@ -1041,7 +1148,7 @@ public class GameView extends View {
         if (!engine.isAi[engine.turn]) return;
         aiThinking = true;
         invalidate();
-        int delay = thinkDelay();
+        long delay = paceDelay();
         handler.postDelayed(aiRunnable, delay);
     }
 
@@ -1059,7 +1166,7 @@ public class GameView extends View {
             invalidate();
             if (!engine.roundOver && engine.turn != mySeat && (!netMode || isHost) && engine.isAi[engine.turn]) {
                 aiThinking = true;
-                int delay = thinkDelay();
+                long delay = paceDelay();
                 handler.postDelayed(this, delay);
             }
         }
@@ -1206,6 +1313,53 @@ public class GameView extends View {
         }
     }
 
+    /** 隐藏面板：连续点「声音」5 次，调整每家出牌间隔 */
+    private void askPace() {
+        try {
+            Activity act = (Activity) getContext();
+            android.widget.LinearLayout root = new android.widget.LinearLayout(act);
+            root.setOrientation(android.widget.LinearLayout.VERTICAL);
+            int pad = (int) dp(18);
+            root.setPadding(pad, pad, pad, pad);
+            android.widget.TextView tv = new android.widget.TextView(act);
+            tv.setText("每家出牌间隔（语音播完才走下一家）");
+            tv.setTextSize(16);
+            tv.setTextColor(0xFFC8A96A);
+            root.addView(tv);
+            android.widget.RadioGroup rg = new android.widget.RadioGroup(act);
+            rg.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            String[] names = {"2 秒", "3 秒", "5 秒", "6 秒"};
+            long[] vals = {2000L, 3000L, 5000L, 6000L};
+            for (int i = 0; i < vals.length; i++) {
+                android.widget.RadioButton rb = new android.widget.RadioButton(act);
+                rb.setText(names[i]);
+                rb.setId(android.view.View.generateViewId());
+                rb.setTextSize(15);
+                rb.setChecked(paceMs == vals[i]);
+                final long v = vals[i];
+                rb.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                    public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                        if (!checked) return;
+                        paceMs = v;
+                        try {
+                            getContext().getSharedPreferences("guandan", 0).edit()
+                                    .putInt("pace", (int) v).commit();
+                        } catch (Throwable e) { }
+                        showToast("出牌间隔 " + (v / 1000) + " 秒");
+                        invalidate();
+                    }
+                });
+                rg.addView(rb);
+            }
+            root.addView(rg);
+            new AlertDialog.Builder(act)
+                    .setTitle("出牌节奏（每家出牌的间隔）")
+                    .setView(root)
+                    .setPositiveButton("完成", null)
+                    .show();
+        } catch (Exception e) { }
+    }
+
     private void askThinkSpeed() {
         try {
             Activity act = (Activity) getContext();
@@ -1218,7 +1372,7 @@ public class GameView extends View {
             for (int d = 0; d < 3; d++) {
                 android.widget.TextView tv = new android.widget.TextView(act);
                 tv.setText(diffNames[d] + "  AI 思考");
-                tv.setTextSize(14);
+                tv.setTextSize(16);
                 tv.setTextColor(0xFFC8A96A);
                 root.addView(tv);
                 android.widget.RadioGroup rg = new android.widget.RadioGroup(act);
@@ -1227,7 +1381,7 @@ public class GameView extends View {
                     android.widget.RadioButton rb = new android.widget.RadioButton(act);
                     rb.setText(lvNames[lv]);
                     rb.setId(android.view.View.generateViewId());
-                    rb.setTextSize(13);
+                    rb.setTextSize(15);
                     rb.setChecked(thinkLevels[d] == lv);
                     final int dd = d, ll = lv;
                     rb.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
@@ -1254,12 +1408,23 @@ public class GameView extends View {
         } catch (Exception e) { }
     }
 
-    private int thinkDelay() {
+    /** 上一句语音剩余时长，用于避免抢话 */
+    private long voiceTailMs() {
+        if (!voiceOn || voice == null) return 0;
+        return voice.lastDurationMs();
+    }
+
+    /** 每位 AI 的出牌间隔：基准约 5 秒，且必须等上一句语音播完再走下一步 */
+    private long paceDelay() {
         int tl = 1;
         try { tl = thinkLevels[Math.max(0, Math.min(2, engine.difficulty))]; } catch (Throwable e) { }
-        if (tl == 0) return 300;
-        if (tl == 2) return 1400;
-        return 800;
+        long jitter = paceMs <= 3000 ? 240 : 700;
+        long base = paceMs + vr.nextInt((int) jitter) - jitter / 2;
+        if (tl == 0) base -= 350; else if (tl == 2) base += 300;
+        if (base < 1000) base = 1000;
+        long need = voiceTailMs() + 420;
+        if (base < need) base = need;
+        return base;
     }
 
     private void startScan() {
@@ -1372,7 +1537,7 @@ public class GameView extends View {
         selected.clear();
         sortHand();
         if (rejoining) { rejoining = false; retryLeft = 0; }
-        speakLastPlay();
+        syncVoiceSig();
         for (int i = 0; i < 4; i++) {
             if (i == mySeat) { lastSeatTags[i] = tags[i]; continue; }
             if ("不要".equals(tags[i]) && !"不要".equals(lastSeatTags[i])) speakPass(i);

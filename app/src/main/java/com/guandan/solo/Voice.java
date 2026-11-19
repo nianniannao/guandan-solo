@@ -16,6 +16,7 @@ import java.util.Locale;
 public class Voice {
 
     private final Context ctx;
+    private LocalVoice local;
     private TextToSpeech tts;
     private boolean ready = false;
     private boolean langOk = false;
@@ -31,7 +32,30 @@ public class Voice {
 
     public Voice(Context c) {
         ctx = c.getApplicationContext();
+        try { local = new LocalVoice(ctx); } catch (Throwable e) { local = null; }
         open(null);
+    }
+
+    /** 内置离线语音是否可用 */
+    public boolean hasLocal() { return local != null && local.isReady(); }
+
+    /** 用内置素材播报若干片段 */
+    public void sayClips(String... parts) {
+        if (!enabled) return;
+        if (local == null || !local.isReady()) return;
+        local.play(parts);
+    }
+
+    /** 立刻停止当前播报（切后台、退出时用） */
+    public void stopSpeech() {
+        try { if (local != null) local.stop(); } catch (Throwable e) { }
+        try { if (tts != null) tts.stop(); } catch (Throwable e) { }
+    }
+
+    /** 上一句播报时长估计（毫秒） */
+    public long lastDurationMs() {
+        if (local != null && local.isReady()) return local.lastDurationMs();
+        return 1000;
     }
 
     private void open(String engine) {
@@ -114,7 +138,10 @@ public class Voice {
         if (!on && tts != null) {
             try { tts.stop(); } catch (Throwable e) { }
         }
-        if (!on) pending.clear();
+        if (!on) {
+            pending.clear();
+            if (local != null) local.stop();
+        }
     }
 
     public boolean isEnabled() { return enabled; }
@@ -158,6 +185,10 @@ public class Voice {
     }
 
     public void shutdown() {
+        if (local != null) {
+            try { local.release(); } catch (Throwable e) { }
+            local = null;
+        }
         if (tone != null) {
             try { tone.release(); } catch (Throwable e) { }
             tone = null;

@@ -32,6 +32,8 @@ public class Engine {
     public int lastPlayer = -1;
     public int passes = 0;
     public Play lastPlay = null;
+    /** 上一手是否为新一轮的首家领出（用于语音播报口径） */
+    public boolean lastLead = false;
 
     public List<Integer> finished = new ArrayList<Integer>();
     public boolean roundOver = false;
@@ -47,6 +49,8 @@ public class Engine {
 
     public Play[] seatLast = new Play[4];
     public boolean[] seatPassed = new boolean[4];
+    /** 本局已经打出的所有牌，供 AI 记牌 */
+    public List<Card> played = new ArrayList<Card>();
 
     public int lastGain = 0;
     public String resultText = "";
@@ -87,10 +91,12 @@ public class Engine {
         finished.clear();
         roundOver = false;
         lastPlay = null;
+        lastLead = false;
         lastPlayer = -1;
         passes = 0;
         turn = (roundNo == 1) ? 0 : playingTeam * 2;
         for (int i = 0; i < 4; i++) { seatLast[i] = null; seatPassed[i] = false; seatTag[i] = null; }
+        played.clear();
         message = "第 " + roundNo + " 局 · 打 " + levelText(level);
         log.clear();
         addLog("开局，打 " + levelText(level) + "，红桃" + levelText(level) + "为逢人配");
@@ -166,10 +172,12 @@ public class Engine {
 
     private void applyPlay(int seat, Play p) {
         hands[seat].removeAll(p.cards);
+        for (Card c : p.cards) played.add(c);
         seatLast[seat] = p;
         seatTag[seat] = p.typeName();
         seatPassed[seat] = false;
         for (int i = 0; i < 4; i++) if (i != seat) seatPassed[i] = false;
+        lastLead = (lastPlay == null);
         lastPlay = p;
         lastPlayer = seat;
         passes = 0;
@@ -188,7 +196,12 @@ public class Engine {
         seatTag[seat] = "不要";
         passes++;
         addLog(seatName(seat) + " 不要");
-        if (passes >= 3) {
+        // 有人出完后，剩几家都不要就算这一轮结束：按在局人数算，而不是固定 3 次
+        int activeN = 0;
+        for (int i = 0; i < 4; i++) if (!isFinished(i)) activeN++;
+        boolean leaderFinished = lastPlayer >= 0 && isFinished(lastPlayer);
+        int need = leaderFinished ? activeN : Math.max(1, activeN - 1);
+        if (passes >= need) {
             int leader;
             if (lastPlayer >= 0 && !isFinished(lastPlayer)) {
                 leader = lastPlayer;
@@ -199,6 +212,7 @@ public class Engine {
                 leader = nextActiveAfter(lastPlayer >= 0 ? lastPlayer : seat);
             }
             lastPlay = null;
+            lastLead = false;
             lastPlayer = -1;
             passes = 0;
             for (int i = 0; i < 4; i++) { seatLast[i] = null; seatPassed[i] = false; seatTag[i] = null; }
@@ -313,6 +327,7 @@ public class Engine {
         resultText = result == null ? "" : result;
         lastGain = gain;
         lastPlay = last;
+        lastLead = false;
         for (int i = 0; i < 4; i++) {
             hands[i].clear();
             seatLast[i] = null;
