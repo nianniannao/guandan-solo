@@ -1,0 +1,6 @@
+· AI reworked: rebalanced candidate move generation and card counting, stronger late-game control
+· Text enlarged and bolded for readability
+· Voice lines re-recorded: singles read the rank, other plays read the pattern, follow-ups use "da ni" / "guan zhu"
+· Play rhythm setting moved next to the sound toggle, default 3 seconds
+· Fixed spurious voice playback after loading a saved game
+· Fixed a stuck pass counter after a player finished their hand

@@ -1,0 +1,13 @@
+Guandan (掼蛋) is the standard Jiangsu two-deck card game: 108 cards, trump-level cards acting as wildcards, and the four-bomb "heavenly king" combination. Play solo against three AI opponents or over a local network.
+
+Features:
+· Nine levels per round with the full promotion/relegation rules
+· Three AI tiers: simple strategy, scored decision making, and scored decision plus endgame Monte-Carlo search; thinking depth can be set per tier
+· Fully offline, no account, no ads, no analytics
+· Five-element (wuxing) visual theme, landscape table, enlarged hand cards
+· Built-in Chinese voice announcements for plays and passes, can be switched off
+· Play rhythm adjustable in 2/3/5/6 second steps
+· Autosave, resume the previous round at any time
+· LAN multiplayer: room discovery over UDP broadcast, reconnect support, 22-second move timeout with托管
+
+The interface is in Chinese.
