@@ -26,6 +26,9 @@ Builds:
     commit: 8d507f55c179e9f3beaa6d61d6cccdccd4334996
     gradle:
       - yes
+    sudo:
+      - apt-get update
+      - apt-get install -y openjdk-17-jdk-headless
     output: app/build/outputs/apk/release/app-release-unsigned.apk
 
 AutoUpdateMode: Version
