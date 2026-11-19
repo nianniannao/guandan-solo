@@ -85,7 +85,7 @@ export class VoicePlayer {
       let player: media.AVPlayer | null = null;
       try {
         player = await media.createAVPlayer();
-        const fd = await this.ctx.resourceManager.getRawFd('voice/' + key + '.mp3');
+        const fd = await this.ctx.resourceManager.getRawFd('voice/n_' + key + '.mp3');
         const p: media.AVPlayer = player;
         p.on('stateChange', (state: media.AVPlayerState) => {
           if (state === 'initialized') {
