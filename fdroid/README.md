@@ -18,8 +18,8 @@
 | 可用 Gradle 构建 | 已提供（`app/build.gradle`，compileSdk 34 / minSdk 21） |
 | 无专有依赖 | 无第三方库，纯 framework API |
 | 无内嵌广告 / 统计 | 无 |
-| 每条 Build 有 tag | 已打 `v7.2` |
-| 语音素材版权 | ⚠️ 由公开在线合成接口生成，见根目录 README「语音素材说明」；若审核要求，替换为自有录音后重新发版 |
+| 每条 Build 有 tag | 已打 `v8.8`（versionCode 20） |
+| 语音素材版权 | ⚠️ `assets/voice` 为 edge-tts 合成，若审核要求自由素材，可在 recipe 的 `prebuild` 里 `rm -rf app/src/main/assets/voice`，应用会自动回落到系统 TTS |
 
 ## 备注
 

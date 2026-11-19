@@ -52,10 +52,12 @@
 
 ## 构建
 
+方式一：Android Studio 打开本仓库直接 Build（compileSdk 34 / minSdk 21）。
+方式二：命令行无 Gradle 打包（需 JDK 8+ 与 Android SDK）：
+
 ```bash
-# 需 JDK 17 + Android SDK（compileSdk 34）
-./gradlew :app:assembleRelease
-# 产物：app/build/outputs/apk/release/app-release-unsigned.apk
+ANDROID=/path/to/android-sdk ./build.sh
+# 产物：guandan.apk
 ```
 
 签名示例：
