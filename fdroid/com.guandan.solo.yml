@@ -14,8 +14,8 @@ Description: |
 
   纯离线运行，无账号、无广告、无统计；五行八卦视觉，横屏牌桌；内置 54 段离线中文
   语音（单张报点数、其余只报牌型，跟牌用「大你/管住」，过牌用「要不起」），可一键
-  关闭；出牌节奏 2/3/5/6 秒可调，语音播完才走下一家；自动存档并可继续上一局；
-  局域网联机支持 UDP 广播自动发现房间、断线重连与 22 秒出牌超时托管，可与鸿蒙版互通。
+  关闭；出牌节奏 2/3/5/6 秒可调；自动存档并可继续上一局；局域网联机支持 UDP 广播
+  自动发现房间、断线重连与 22 秒出牌超时托管，可与鸿蒙版互通。
 
 RepoType: git
 Repo: https://github.com/nianniannao/guandan-solo.git
@@ -23,11 +23,10 @@ Repo: https://github.com/nianniannao/guandan-solo.git
 Builds:
   - versionName: '8.8'
     versionCode: 20
-    commit: v8.8
+    commit: 8d507f55c179e9f3beaa6d61d6cccdccd4334996
     gradle:
       - yes
     output: app/build/outputs/apk/release/app-release-unsigned.apk
-    srclibs: []
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
