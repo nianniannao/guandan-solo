@@ -1,9 +1,9 @@
 {
   "app": {
     "bundleName": "com.guandan.solo",
-    "vendor": "workbuddy",
-    "versionCode": 1000000,
-    "versionName": "1.0.0",
+    "vendor": "nianniannao",
+    "versionCode": 20,
+    "versionName": "8.8",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

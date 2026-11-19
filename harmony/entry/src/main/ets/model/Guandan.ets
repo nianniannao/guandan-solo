@@ -271,15 +271,63 @@ export class Ai {
 
   static handsCount(hand: Card[], level: number): number {
     const cnt: number[] = new Array<number>(18).fill(0);
-    for (let i = 0; i < hand.length; i++) cnt[hand[i].rank] += 1;
+    for (let i = 0; i < hand.length; i++) {
+      if (!hand[i].wild) cnt[hand[i].rank] += 1;
+    }
+    let wilds: number = 0;
+    for (let i = 0; i < hand.length; i++) if (hand[i].wild) wilds++;
     let combos: number = 0;
-    for (let r = 2; r <= 14; r++) if (cnt[r] >= 4) { combos++; cnt[r] = 0; }
+    // 炸弹单独成手
+    for (let r = 2; r <= 14; r++) if (cnt[r] >= 4) { combos++; cnt[r] -= 4; }
+    // 顺子：贪心取最长连续段（>=5）
+    for (let s0 = 2; s0 <= 10; s0++) {
+      let len: number = 0;
+      for (let r = s0; r <= 14; r++) {
+        if (cnt[r] >= 1) len++;
+        else break;
+      }
+      if (len >= 5) {
+        for (let r = s0; r < s0 + len; r++) cnt[r] -= 1;
+        combos++;
+        s0 = s0 + len - 1;
+      }
+    }
+    // 三张优先配对子成 三带二
     for (let r = 2; r <= 17; r++) {
-      if (cnt[r] >= 3) { combos++; cnt[r] -= 3; }
-      else if (cnt[r] === 2) { combos++; cnt[r] = 0; }
+      if (cnt[r] >= 3) {
+        combos++;
+        cnt[r] -= 3;
+        let paired: boolean = false;
+        for (let q = 2; q <= 17 && !paired; q++) {
+          if (cnt[q] === 2) { cnt[q] = 0; paired = true; }
+        }
+        if (!paired && wilds >= 2) { wilds -= 2; paired = true; }
+      }
+    }
+    for (let r = 2; r <= 17; r++) {
+      if (cnt[r] === 2) { combos++; cnt[r] = 0; }
       else if (cnt[r] === 1) { combos++; cnt[r] = 0; }
     }
+    // 逢人配按散牌估算
+    combos += Math.ceil(wilds / 2);
     return combos < 1 ? 1 : combos;
+  }
+
+  /** 外面（除自己手牌与已出牌）还剩多少张比 key 大的牌，用于判断控制力 */
+  static higherLeft(e: Engine, seat: number, key: number): number {
+    let left: number = 0;
+    for (let r = 2; r <= 14; r++) {
+      const w: number = Rules.weight(r, e.level);
+      if (w <= key) continue;
+      let total: number = 8;
+      let mine: number = 0;
+      for (let i = 0; i < e.hands[seat].length; i++) if (e.hands[seat][i].rank === r) mine++;
+      const played: number = e.playedCounts[r];
+      left += Math.max(0, total - mine - played);
+    }
+    if (key < 16) left += Math.max(0, 2 - e.playedCounts[15]);
+    if (key < 17) left += Math.max(0, 2 - e.playedCounts[16]);
+    return left;
   }
 
   static score(e: Engine, seat: number, p: Play): number {
@@ -326,7 +374,42 @@ export class Ai {
       }
     }
     if (minOpp <= 2 && p.type === 1 && p.key < 14) block -= 3;
+    // 记牌：这张牌外面已经没有了 → 拿到牌权，残局里价值高
+    if (p.power === 0 && Ai.higherLeft(e, seat, p.key) === 0 && rest.length <= 10) run += 5;
+    // 对手只剩一两张时，宁可拆牌也要压低他的出牌空间
+    if (minOpp <= 2 && p.cards.length >= 2) run += 4;
     return run + block + mateAdj + breakCost - bomb;
+  }
+
+  /** 领出（自由出牌）时的选牌：先走散、保留控制牌与炸弹，尽量多走张数 */
+  static chooseLead(e: Engine, seat: number): Play | null {
+    const hand: Card[] = e.hands[seat];
+    const cands: Play[] = Ai.candidates(hand, e.level);
+    if (cands.length === 0) return null;
+    // 能一把走完立刻走完
+    for (let i = 0; i < cands.length; i++) {
+      if (cands[i].cards.length === hand.length) return cands[i];
+    }
+    const minOpp: number = e.minOpponentCards(seat);
+    const mateLeft: number = e.hands[e.teammate(seat)].length;
+    let best: Play | null = null;
+    let bestScore: number = -100000;
+    for (let i = 0; i < cands.length; i++) {
+      const p: Play = cands[i];
+      let sc: number = Ai.score(e, seat, p);
+      sc += p.cards.length * 2.6;
+      // 炸弹只在关键局面用（对手快走完或自己能收尾）
+      if (p.power > 0) {
+        sc -= minOpp <= 6 || hand.length - p.cards.length <= 3 ? 6 : 34;
+        if (p.power >= 100) sc -= 20;
+      }
+      // 手里最大的一张留着控场，别一上来就甩
+      if (p.type === 1 && Ai.higherLeft(e, seat, p.key) === 0 && hand.length > 6) sc -= 9;
+      // 队友快走完时，多出小牌给队友让路
+      if (mateLeft <= 5 && p.cards.length <= 2 && p.key < 13) sc += 3;
+      if (sc > bestScore) { bestScore = sc; best = p; }
+    }
+    return best;
   }
 
   static chooseBest(e: Engine, seat: number, beat: Play[]): Play | null {
@@ -400,6 +483,8 @@ export class Engine {
   resultText: string = '';
   level_1: string = '';
   logs: string[] = [];
+  /** 已经打出去的牌按点数计数（记牌用） */
+  playedCounts: number[] = new Array<number>(18).fill(0);
 
   newMatch(diff: number): void {
     this.difficulty = diff;
@@ -434,6 +519,7 @@ export class Engine {
     this.passes = 0;
     this.turn = this.roundNo === 1 ? 0 : this.playingTeam * 2;
     for (let i = 0; i < 4; i++) { this.seatTag[i] = '—'; this.seatPassed[i] = false; }
+    for (let r = 0; r < 18; r++) this.playedCounts[r] = 0;
     this.logs = ['开局，打 ' + Engine.levelText(this.level)];
   }
 
@@ -493,6 +579,7 @@ export class Engine {
     for (let i = 0; i < p.cards.length; i++) {
       const idx: number = h.indexOf(p.cards[i]);
       if (idx >= 0) h.splice(idx, 1);
+      this.playedCounts[p.cards[i].rank] += 1;
     }
     this.seatTag[seat] = p.typeName();
     this.seatPassed[seat] = false;
@@ -506,14 +593,27 @@ export class Engine {
     this.nextTurn(seat);
   }
 
+  /** 当前还需要几家过牌才算一轮结束：除领出者以外的所有未出完玩家 */
+  needPasses(): number {
+    let active: number = 0;
+    for (let i = 0; i < 4; i++) if (!this.isFinished(i)) active++;
+    let leaderActive: boolean = this.lastPlayer >= 0 && !this.isFinished(this.lastPlayer);
+    let need: number = active - (leaderActive ? 1 : 0);
+    return need < 1 ? 1 : need;
+  }
+
   doPass(seat: number): void {
     this.seatPassed[seat] = true;
     this.seatTag[seat] = '不要';
     this.passes += 1;
-    if (this.passes >= 3) {
-      let leader: number = this.lastPlayer;
-      if (this.isFinished(leader)) leader = this.teammate(leader);
-      if (this.isFinished(leader)) leader = this.nextActiveAfter(seat);
+    if (this.passes >= this.needPasses()) {
+      // 一轮结束：领出者重新出牌；若领出者已出完，由队友接风，队友也出完则顺延下一位
+      let leader: number = this.lastPlayer >= 0 ? this.lastPlayer : seat;
+      if (this.isFinished(leader)) {
+        const mate: number = this.teammate(leader);
+        if (!this.isFinished(mate)) leader = mate;
+        else leader = this.nextActiveAfter(seat);
+      }
       this.lastPlay = null;
       this.lastPlayer = -1;
       this.passes = 0;
@@ -565,19 +665,39 @@ export class Engine {
     const seat: number = this.turn;
     if (this.isFinished(seat) || !this.isAi[seat]) return;
     const hand: Card[] = this.hands[seat];
-    const cands = Ai.candidates(hand, this.level);
+    if (hand.length === 0) { this.nextTurn(seat); return; }
+
+    // 首家：自由出牌（不在旧逻辑里固定甩最小的单张）
+    if (this.lastPlay === null) {
+      let lead: Play | null = Ai.chooseLead(this, seat);
+      if (lead === null) lead = Rules.evaluateExact([hand[hand.length - 1]], this.level);
+      if (lead !== null) this.applyPlay(seat, lead);
+      return;
+    }
+
+    const cands: Play[] = Ai.candidates(hand, this.level);
     const beat: Play[] = [];
     for (let i = 0; i < cands.length; i++) {
       if (Rules.canBeat(this.lastPlay, cands[i])) beat.push(cands[i]);
     }
-    let chosen: Play | null = null;
+    // 能一把走完就走完
     for (let i = 0; i < beat.length; i++) {
       if (beat[i].cards.length === hand.length) { this.applyPlay(seat, beat[i]); return; }
     }
     const mate: boolean = this.lastPlayer >= 0 && this.lastPlayer !== seat && (this.lastPlayer % 2) === (seat % 2);
-    if (this.lastPlay !== null && mate && this.difficulty > 0) {
-      chosen = null;
-    } else if (beat.length > 0 && this.difficulty === 0) {
+    if (mate) {
+      // 队友的牌：难度高时不再无脑顶，除非自己快走完或对手已逼近
+      if (this.difficulty === 0) { this.doPass(seat); return; }
+      if (hand.length > 4 && this.minOpponentCards(seat) > 4) { this.doPass(seat); return; }
+    } else if (this.difficulty === 1 && hand.length > 12 && this.minOpponentCards(seat) > 8) {
+      // 高级难度：前半局不为小牌浪费大牌
+      let onlyBig: boolean = true;
+      for (let i = 0; i < beat.length; i++) if (beat[i].key <= 11) onlyBig = false;
+      if (onlyBig) { this.doPass(seat); return; }
+    }
+
+    let chosen: Play | null = null;
+    if (beat.length > 0 && this.difficulty === 0) {
       let cheapest: Play | null = null;
       for (let i = 0; i < beat.length; i++) {
         if (beat[i].power > 0) continue;
@@ -587,10 +707,7 @@ export class Engine {
     } else if (beat.length > 0) {
       chosen = Ai.chooseBest(this, seat, beat);
     }
-    if (chosen === null) {
-      if (this.lastPlay !== null) { this.doPass(seat); return; }
-      chosen = Rules.evaluateExact([hand[hand.length - 1]], this.level);
-    }
-    if (chosen !== null) this.applyPlay(seat, chosen);
+    if (chosen === null) { this.doPass(seat); return; }
+    this.applyPlay(seat, chosen);
   }
 }

@@ -1,34 +1,51 @@
 # 掼蛋 · 鸿蒙版（ArkTS）
 
 与安卓版同一套规则、同一个联机协议（TCP 48620，见 `PROTOCOL.md`），可与安卓版互通联机。
+当前对齐安卓 **v8.8（versionCode 20）**。
 
 ## 目录
 
 ```
-guandan-harmony/
-├─ AppScope/app.json5
-├─ build-profile.json5          # 工程级构建配置
+harmony/
+├─ AppScope/app.json5              # bundleName com.guandan.solo，versionName 8.8 / versionCode 20
+├─ build-profile.json5             # compatibleSdkVersion 5.0.0(12)，runtimeOS HarmonyOS
 ├─ hvigorfile.ts
 ├─ entry/
-│  ├─ build-profile.json5
-│  ├─ src/main/module.json5     # 已声明 INTERNET / GET_NETWORK_INFO
+│  ├─ src/main/module.json5        # 已声明 INTERNET / GET_NETWORK_INFO
 │  ├─ src/main/ets/
 │  │  ├─ entryability/EntryAbility.ets
-│  │  ├─ model/Guandan.ets      # 牌型、规则、AI、引擎（与安卓同逻辑）
-│  │  ├─ net/Lan.ets            # TCPSocket 房主 / 加入方
-│  │  └─ pages/Index.ets        # 五行八卦风格界面
-│  └─ src/main/resources/       # 图标、主题色、页面清单
+│  │  ├─ model/Guandan.ets         # 规则、牌型、AI、引擎
+│  │  ├─ net/Lan.ets               # TCPSocket 房主 / 加入方
+│  │  ├─ pages/Index.ets           # 五行八卦界面 + 设置行
+│  │  └─ voice/Voice.ets           # 内置离线语音播报（AVPlayer，按素材时长排队）
+│  ├─ src/main/resources/
+│  │  ├─ rawfile/voice/            # 54 段中文播报 mp3 + index.txt（与安卓同一套素材）
+│  │  └─ base/                     # 图标、主题色、页面清单
 ```
 
-## 怎么出 HAP
+## v8.8 在鸿蒙版上做了什么
 
-1. 安装 **DevEco Studio 5.0** 及以上（自带 HarmonyOS SDK、hvigor）
-2. 打开本目录（Open Project）
-3. 首次会自动 Sync 依赖；在 `Project Structure → Signing Configs` 勾选自动签名
-4. 连鸿蒙真机（开发者模式 + USB 调试），点 Run 即可安装
-5. 打包：`Build → Build Hap(s)/APP(s) → Build Hap(s)`，产物在 `entry/build/default/outputs/default/`
+1. **AI 增强**：候选牌枚举后按“手数减少 / 拆牌代价 / 炸弹保留 / 记牌控制力 / 队友与对手残局”综合打分；
+   新增记牌（`Engine.playedCounts`）与领出决策 `Ai.chooseLead`，不再无脑甩最小单张。
+2. **接风不再卡住**：过牌判定从固定 3 家改为“除领出者外的全部活跃玩家”，有人出完后轮次仍能正常结束。
+3. **语音播报**：单张报点数，其余只报牌型；跟牌用「大你 / 管住」，炸弹用「炸你一下」，过牌用「要不起」，
+   给队友让牌用「让你一手」。不报左右对家称呼。语音播完才轮到下一位，不会话赶话。
+4. **节奏设置**：`2s / 3s / 5s / 6s` 四档，默认 3 秒，位置在「声音」左侧同一行。
+5. **字号加粗加大**：座位、手牌、桌面牌、按钮、提示文字整体放大并加粗。
+6. **开局静默**：只在“出现了新的出牌”时播报，读档 / 重连同步状态不会凭空出声。
 
-> 本机 Linux 环境没有 HarmonyOS SDK，所以只交付可编译的工程源码，`hvigor` 打包需在 DevEco Studio 里完成。
+## 怎么出 HAP（必须签名才能装到纯血鸿蒙）
+
+1. 安装 **DevEco Studio 5.0** 及以上（自带 HarmonyOS NEXT SDK 与 hvigor）
+2. `File → Open` 打开本 `harmony` 目录，等待首次 Sync 完成
+3. `File → Project Structure → Signing Configs`，勾 **Automatically generate signature**（需登录华为开发者账号），
+   它会自动生成 `debug`/`release` 签名材料
+4. 连真机（开发者模式 + USB 调试）→ 点 Run 直接安装
+5. 出安装包：`Build → Build Hap(s)/APP(s) → Build Hap(s)`，
+   产物在 `entry/build/default/outputs/default/` 下的 `*.hap`
+
+> HarmonyOS NEXT 只接受已签名 HAP，未签名包无法安装；上架应用市场则需在 AppGallery Connect 创建应用与发布证书。
+> 本仓库的 Linux 环境没有 HarmonyOS SDK，因此这里只提供可编译工程，`hvigor` 打包需在 DevEco Studio 内完成。
 
 ## 与安卓联机
 
@@ -36,9 +53,7 @@ guandan-harmony/
 - 两端须在同一局域网（同一路由器 / 热点下）
 - 端口 48620 需未被占用，路由器不隔离设备
 
-## 当前实现范围
+## 已知限制
 
-- 规则内核：牌型判定、逢人配展开、炸弹分级、接风、升级、结算 —— 与安卓逐条对齐
-- AI：候选牌枚举 + 三档策略（初级/高级/终极）
-- 联机：房主权威 + 状态快照全量同步 + UDP 广播发现（48621）+ 掉线重连（90 秒内原座复位）+ 22 秒出牌超时托管
-- 界面：五行配色（木青/土金/水玄）+ 八卦方位座位（乾·天行 / 坤·厚德 / 震·雷动 / 兑·泽悦）
+- 语音音量为系统媒体音量，暂未做独立音量条
+- 鸿蒙版尚未接入自动存档（安卓版有）

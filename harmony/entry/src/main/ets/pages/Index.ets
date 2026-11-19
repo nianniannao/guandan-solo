@@ -1,5 +1,7 @@
 import { Engine, Card, Play, Rules, Ai } from '../model/Guandan';
 import { LanHost, LanClient, StateMsg, StateMsgSeat, PORT } from '../net/Lan';
+import { VoicePlayer } from '../voice/Voice';
+import { common } from '@kit.AbilityKit';
 
 interface CardView {
   id: number;
@@ -37,6 +39,8 @@ struct Index {
   @State mySeat: number = 0;
   @State accent: string = '#C8A96A';
   @State thinkLevel: number = 1;
+  @State voiceOn: boolean = true;
+  @State tempoIdx: number = 1;
 
   private engine: Engine = new Engine();
   private host: LanHost | null = null;
@@ -46,10 +50,91 @@ struct Index {
   private lastRoom: string = '';
   private lastSeat: number = 0;
   private retryLeft: number = 0;
+  private vp: VoicePlayer | null = null;
+  private voiceSig: string = '';
+
+  aboutToAppear(): void {
+    try {
+      this.vp = new VoicePlayer(getContext(this) as common.UIAbilityContext);
+      this.vp.setEnabled(this.voiceOn);
+    } catch (e) {
+      this.vp = null;
+    }
+  }
 
   aboutToDisappear(): void {
     if (this.host !== null) this.host.stop();
     if (this.client !== null) this.client.close();
+    if (this.vp !== null) this.vp.shutdown();
+  }
+
+  // ---------- 语音与节奏 ----------
+  tempoMs(): number {
+    if (this.tempoIdx === 0) return 2000;
+    if (this.tempoIdx === 2) return 5000;
+    if (this.tempoIdx === 3) return 6000;
+    return 3000;
+  }
+
+  tempoLabel(): string {
+    return (this.tempoMs() / 1000) + 's';
+  }
+
+  toggleVoice(): void {
+    this.voiceOn = !this.voiceOn;
+    if (this.vp !== null) this.vp.setEnabled(this.voiceOn);
+    this.tip = this.voiceOn ? '语音播报已开启' : '语音播报已关闭';
+  }
+
+  setTempo(i: number): void {
+    this.tempoIdx = i;
+    this.tip = '出牌节奏：每人约 ' + this.tempoLabel();
+  }
+
+  playKeys(lead: boolean, p: Play): string[] {
+    if (!lead) {
+      if (p.power > 0) return [VoicePlayer.pick(['f1', 'f2'])];
+      return [VoicePlayer.pick(['d1', 'd2', 'd3', 'g1', 'g2', 'g3', 'g4'])];
+    }
+    const t: number = p.type;
+    if (t === 1) return ['s' + p.key];
+    if (t === 2) return [VoicePlayer.pick(['u1', 'u2'])];
+    if (t === 3) return [VoicePlayer.pick(['u3', 'u4'])];
+    if (t === 4) return ['u5'];
+    if (t === 5) return [VoicePlayer.pick(['u6', 'u7'])];
+    if (t === 6) return ['u8'];
+    if (t === 7) return ['u9'];
+    if (t === 8) return ['u10'];
+    if (t === 10) return ['z2'];
+    if (t === 9) {
+      if (p.size >= 4 && p.size <= 8) return ['b' + p.size];
+      return [VoicePlayer.pick(['z1', 'b8'])];
+    }
+    return ['u6'];
+  }
+
+  /** 有新出牌才播；同一手重复刷新不重复播，避免读档/重连时凭空出声 */
+  announcePlay(lead: boolean, p: Play, seat: number): void {
+    if (!this.voiceOn || this.vp === null) return;
+    let sig: string = '' + seat + '#' + p.type + '#' + p.key + '#' + p.size + '#';
+    for (let i = 0; i < p.cards.length; i++) sig = sig + p.cards[i].id + ',';
+    if (sig === this.voiceSig) return;
+    this.voiceSig = sig;
+    this.vp.say(this.playKeys(lead, p));
+  }
+
+  announcePass(seat: number): void {
+    if (!this.voiceOn || this.vp === null) return;
+    const toMate: boolean = this.engine.lastPlay !== null && this.engine.lastPlayer === ((seat + 2) % 4);
+    this.voiceSig = 'pass#' + seat + '#' + this.engine.logs.join('|');
+    this.vp.say([VoicePlayer.pick(toMate ? ['y1', 'y2'] : ['p1', 'p2', 'p3', 'p4'])]);
+  }
+
+  /** 等语音播完再走下一家，同时至少给每人一个节奏窗口 */
+  nextDelay(): number {
+    const base: number = this.tempoMs();
+    const busy: number = this.vp !== null ? this.vp.remainingMs() : 0;
+    return Math.max(base, busy + 260);
   }
 
   // ---------- 本地单机 ----------
@@ -64,6 +149,7 @@ struct Index {
     for (let i = 0; i < 4; i++) this.engine.isAi[i] = i !== 0;
     this.screen = 'table';
     this.picked = [];
+    this.voiceSig = '';
     this.refresh();
     this.loopAi();
   }
@@ -88,12 +174,24 @@ struct Index {
     }
     if (this.online && !this.amHost) return;
     if (!this.engine.isAi[this.engine.turn]) return;
+    const seat: number = this.engine.turn;
+    const leadBefore: boolean = this.engine.lastPlay === null;
+    const prevLast: Play | null = this.engine.lastPlay;
     setTimeout(() => {
+      const prevPasses: number = this.engine.passes;
       this.engine.aiStep();
+      const nowLast: Play | null = this.engine.lastPlay;
+      if (this.engine.roundOver) {
+        // 本局结束
+      } else if (nowLast !== null && nowLast !== prevLast) {
+        this.announcePlay(leadBefore, nowLast, seat);
+      } else if (this.engine.passes > prevPasses || this.engine.seatTag[seat] === '不要') {
+        this.announcePass(seat);
+      }
       if (this.online && this.amHost) this.pushState();
       this.refresh();
       this.loopAi();
-    }, this.thinkDelay());
+    }, this.nextDelay());
   }
 
   // ---------- 联机 ----------
@@ -123,13 +221,16 @@ struct Index {
       for (let i = 0; i < h.length; i++) {
         if (ids.indexOf(h[i].id) >= 0) cards.push(h[i]);
       }
+      const leadNow: boolean = this.engine.lastPlay === null;
       const err: string = this.engine.playCards(seat, cards);
       if (err.length > 0) this.tip = '出牌无效：' + err;
+      else if (this.engine.lastPlay !== null) this.announcePlay(leadNow, this.engine.lastPlay, seat);
       this.pushState();
       this.refresh();
       this.loopAi();
     };
     host.onPass = (seat: number) => {
+      this.announcePass(seat);
       this.engine.doPass(seat);
       this.pushState();
       this.refresh();
@@ -227,6 +328,7 @@ struct Index {
       this.engine.lastPlay = p;
     }
     this.refresh();
+    this.voiceSig = this.engine.lastPlay === null ? '' : ('sync#' + this.engine.lastPlayer + '#' + this.engine.lastPlay.type);
   }
 
   pushState(): void {
@@ -341,8 +443,10 @@ struct Index {
     const h: Card[] = this.engine.hands[this.mySeat];
     const cards: Card[] = [];
     for (let i = 0; i < h.length; i++) if (this.picked.indexOf(h[i].id) >= 0) cards.push(h[i]);
+    const leadNow: boolean = this.engine.lastPlay === null;
     const err: string = this.engine.playCards(this.mySeat, cards);
     if (err.length > 0) { this.tip = err; this.refresh(); return; }
+    if (this.engine.lastPlay !== null) this.announcePlay(leadNow, this.engine.lastPlay, this.mySeat);
     this.picked = [];
     if (this.online && this.amHost) this.pushState();
     this.refresh();
@@ -357,6 +461,7 @@ struct Index {
       this.refresh();
       return;
     }
+    this.announcePass(this.mySeat);
     this.engine.doPass(this.mySeat);
     this.picked = [];
     if (this.online && this.amHost) this.pushState();
@@ -401,10 +506,10 @@ struct Index {
   // ---------- UI ----------
   cardChip(cv: CardView): Column {
     Column() {
-      Text(cv.text).fontSize(15).fontWeight(FontWeight.Medium)
+      Text(cv.text).fontSize(17).fontWeight(FontWeight.Bold)
         .fontColor(cv.red ? '#B4473E' : '#23282F')
       if (cv.wild) {
-        Text('配').fontSize(9).fontColor('#C8A96A')
+        Text('配').fontSize(11).fontColor('#C8A96A')
       }
     }
     .width(46).height(70)
@@ -419,7 +524,7 @@ struct Index {
   @Builder
   actionBtn(label: string, primary: boolean, onTap: () => void) {
     Text(label)
-      .fontSize(14)
+      .fontSize(16).fontWeight(FontWeight.Medium)
       .fontColor(primary ? '#101315' : '#E9E4D8')
       .width(primary ? 96 : 74).height(38)
       .textAlign(TextAlign.Center)
@@ -435,7 +540,7 @@ struct Index {
       if (this.screen === 'menu') {
         Column() {
           Row().width('90%').height(1).backgroundColor('#33C8A96A').margin({ top: 10 })
-          Text('掼 蛋').fontSize(34).fontColor('#C8A96A').letterSpacing(14).margin({ top: 18 })
+          Text('掼 蛋').fontSize(38).fontWeight(FontWeight.Bold).fontColor('#C8A96A').letterSpacing(14).margin({ top: 18 })
           Text('G U A N D A N   ·   S O L O').fontSize(10).fontColor('#8A939E').margin({ top: 6 })
           Row() {
             this.menuCard('初 级', '木 · 生发', '#4E8E6A', () => { this.startLocal(0); })
@@ -444,11 +549,11 @@ struct Index {
           }.width('94%').justifyContent(FlexAlign.SpaceBetween).margin({ top: 18 })
 
           Row() {
-            Text('创建房间 · 房主').fontSize(13).fontColor('#E9E4D8')
+            Text('创建房间 · 房主').fontSize(15).fontColor('#E9E4D8')
               .width(170).height(38).textAlign(TextAlign.Center)
               .backgroundColor('#141A20').borderRadius(5).borderWidth(1).borderColor('#44000000')
               .onClick(() => { this.createRoom(1); })
-            Text('加入房间').fontSize(13).fontColor('#E9E4D8')
+            Text('加入房间').fontSize(15).fontColor('#E9E4D8')
               .width(170).height(38).textAlign(TextAlign.Center)
               .backgroundColor('#141A20').borderRadius(5).borderWidth(1).borderColor('#44000000')
               .onClick(() => { this.showIp = true; })
@@ -473,7 +578,7 @@ struct Index {
             Text(this.tip).fontSize(11).fontColor('#88FFFFFF').margin({ top: 10 })
           }
           Text('标准江苏掼蛋 · 两副牌 · 逢人配 · 局域端口 48620')
-            .fontSize(10).fontColor('#66FFFFFF').margin({ top: 12 })
+            .fontSize(11).fontColor('#66FFFFFF').margin({ top: 12 })
           Text('AI 思考：' + this.thinkLabel() + '（点击切换）')
             .fontSize(10).fontColor('#99C8A96A').margin({ top: 8 })
             .onClick(() => {
@@ -485,9 +590,9 @@ struct Index {
       } else {
         Column() {
           Row() {
-            Text('掼 蛋').fontSize(14).fontColor(this.accent)
-            Text(this.headLine).fontSize(12).fontColor('#E9E4D8').margin({ left: 12 }).layoutWeight(1)
-            Text('退出').fontSize(12).fontColor('#8A939E')
+            Text('掼 蛋').fontSize(16).fontWeight(FontWeight.Bold).fontColor(this.accent)
+            Text(this.headLine).fontSize(13).fontWeight(FontWeight.Medium).fontColor('#E9E4D8').margin({ left: 12 }).layoutWeight(1)
+            Text('退出').fontSize(13).fontColor('#8A939E')
               .onClick(() => {
                 if (this.host !== null) this.host.stop();
                 if (this.client !== null) this.client.close();
@@ -496,13 +601,41 @@ struct Index {
               })
           }.width('100%').padding({ left: 14, right: 14, top: 8, bottom: 6 })
 
+          Row() {
+            Text('节奏').fontSize(12).fontWeight(FontWeight.Medium).fontColor('#8A939E')
+            Text('2s').fontSize(12).fontWeight(FontWeight.Medium)
+              .fontColor(this.tempoIdx === 0 ? '#101315' : '#E9E4D8')
+              .backgroundColor(this.tempoIdx === 0 ? this.accent : '#141A20')
+              .width(34).height(24).textAlign(TextAlign.Center).borderRadius(4)
+              .margin({ left: 6 }).onClick(() => { this.setTempo(0); })
+            Text('3s').fontSize(12).fontWeight(FontWeight.Medium)
+              .fontColor(this.tempoIdx === 1 ? '#101315' : '#E9E4D8')
+              .backgroundColor(this.tempoIdx === 1 ? this.accent : '#141A20')
+              .width(34).height(24).textAlign(TextAlign.Center).borderRadius(4)
+              .margin({ left: 4 }).onClick(() => { this.setTempo(1); })
+            Text('5s').fontSize(12).fontWeight(FontWeight.Medium)
+              .fontColor(this.tempoIdx === 2 ? '#101315' : '#E9E4D8')
+              .backgroundColor(this.tempoIdx === 2 ? this.accent : '#141A20')
+              .width(34).height(24).textAlign(TextAlign.Center).borderRadius(4)
+              .margin({ left: 4 }).onClick(() => { this.setTempo(2); })
+            Text('6s').fontSize(12).fontWeight(FontWeight.Medium)
+              .fontColor(this.tempoIdx === 3 ? '#101315' : '#E9E4D8')
+              .backgroundColor(this.tempoIdx === 3 ? this.accent : '#141A20')
+              .width(34).height(24).textAlign(TextAlign.Center).borderRadius(4)
+              .margin({ left: 4 }).onClick(() => { this.setTempo(3); })
+            Blank()
+            Text(this.voiceOn ? '声音 开' : '声音 关').fontSize(12).fontWeight(FontWeight.Medium)
+              .fontColor(this.voiceOn ? this.accent : '#8A939E')
+              .onClick(() => { this.toggleVoice(); })
+          }.width('100%').padding({ left: 14, right: 14, bottom: 4 })
+
           Row().width('100%').justifyContent(FlexAlign.SpaceAround) {
             ForEach(this.seats, (s: SeatView) => {
               Column() {
-                Text(s.name).fontSize(11).fontColor('#C8A96A')
-                Text(s.pos).fontSize(8).fontColor('#8A939E')
-                Text(s.count).fontSize(12).fontColor('#E9E4D8')
-                Text(s.tag).fontSize(9).fontColor('#88FFFFFF')
+                Text(s.name).fontSize(13).fontWeight(FontWeight.Bold).fontColor('#C8A96A')
+                Text(s.pos).fontSize(10).fontColor('#8A939E')
+                Text(s.count).fontSize(15).fontWeight(FontWeight.Medium).fontColor('#E9E4D8')
+                Text(s.tag).fontSize(11).fontColor(this.accent)
               }
               .width(110).height(62)
               .backgroundColor(s.active ? '#1B242C' : '#141A20')
@@ -512,20 +645,20 @@ struct Index {
           }.margin({ top: 4 })
 
           Column() {
-            Text(this.lastTag).fontSize(10).fontColor('#88FFFFFF')
+            Text(this.lastTag).fontSize(12).fontColor('#CCFFFFFF')
             Row() {
               ForEach(this.lastCards, (cv: CardView) => {
-                Text(cv.text).fontSize(13).fontColor(cv.red ? '#B4473E' : '#23282F')
+                Text(cv.text).fontSize(19).fontWeight(FontWeight.Bold).fontColor(cv.red ? '#B4473E' : '#23282F')
                   .width(34).height(48).textAlign(TextAlign.Center)
                   .backgroundColor('#F3F0E8').borderRadius(4).margin({ right: -8 })
               })
             }
-            Text(this.logLine).fontSize(10).fontColor('#88FFFFFF').margin({ top: 6 })
+            Text(this.logLine).fontSize(12).fontColor('#AAFFFFFF').margin({ top: 6 })
           }.height(130).justifyContent(FlexAlign.Center)
 
           Row().layoutWeight(1)
 
-          Text(this.tip).fontSize(11).fontColor('#C8A96A')
+          Text(this.tip).fontSize(13).fontColor('#C8A96A')
           Scroll() {
             Row() {
               ForEach(this.hand, (cv: CardView) => {
@@ -557,9 +690,9 @@ struct Index {
 
         if (this.over) {
           Column() {
-            Text('本 局 结 束').fontSize(15).fontColor(this.accent).letterSpacing(6)
-            Text(this.result).fontSize(12).fontColor('#E9E4D8').margin({ top: 10 }).textAlign(TextAlign.Center)
-            Text('继续').fontSize(13).fontColor('#101315')
+            Text('本 局 结 束').fontSize(18).fontWeight(FontWeight.Bold).fontColor(this.accent).letterSpacing(6)
+            Text(this.result).fontSize(14).fontColor('#E9E4D8').margin({ top: 10 }).textAlign(TextAlign.Center)
+            Text('继续').fontSize(15).fontColor('#101315')
               .width(120).height(36).textAlign(TextAlign.Center)
               .backgroundColor(this.accent).borderRadius(5).margin({ top: 16 })
               .onClick(() => { this.nextRound(); })
@@ -577,8 +710,8 @@ struct Index {
   @Builder
   menuCard(title: string, sub: string, color: string, onTap: () => void) {
     Column() {
-      Text(title).fontSize(17).fontColor(color).letterSpacing(4)
-      Text(sub).fontSize(10).fontColor('#AAFFFFFF').margin({ top: 6 })
+      Text(title).fontSize(20).fontWeight(FontWeight.Bold).fontColor(color).letterSpacing(4)
+      Text(sub).fontSize(12).fontColor('#AAFFFFFF').margin({ top: 6 })
     }
     .width('31%').height(110).justifyContent(FlexAlign.Center)
     .backgroundColor('#141A20').borderRadius(6).borderWidth(1).borderColor(color + '80')
